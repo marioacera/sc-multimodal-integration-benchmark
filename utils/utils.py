@@ -234,3 +234,189 @@ def comparison_heatmap_percent(adata, key1, key2, label_1=None, label_2=None, cm
     s.set_xlabel(label_1, fontsize = 12)
     # plt.show()
     return df
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+import seaborn as sns
+
+def custom_dotplot(
+    adata,
+    var_names,
+    groupby,
+    padd_list_x,
+    category_order=None,
+    figsize=(12, 6),
+    cmap="coolwarm",
+    short_padding=0.1,
+    long_padding=0.5,
+    x_padding_interval=3,
+    dot_min=0.05,
+    dot_max=1.0,
+    only_expressed=False,
+    vmax=None,
+    vmin=None
+):
+    """
+    Custom dot plot with legends adjusted and uniform padding, but with axes switched:
+    Genes on the X-axis, Categories on the Y-axis.
+    """
+    # --- 1) Set up categories in the desired order ---
+    categories = adata.obs[groupby].unique()
+    if category_order:
+        categories_order = category_order
+    else:
+        categories_order = sorted(categories)
+
+    # --- 2) Compute percentage of cells expressing each gene, grouped by category ---
+    percentages = pd.DataFrame(
+        {
+            cat: (adata[adata.obs[groupby] == cat, var_names].X > 0).mean(axis=0).A1 * 100
+            for cat in categories_order
+        },
+        index=var_names,
+    )
+
+    # --- 3) Compute mean expression values (either non-zero only or full mean) ---
+    if only_expressed:
+        mean_expression = pd.DataFrame(index=var_names)
+        for cat in categories_order:
+            mean_values = []
+            for gene in var_names:
+                gene_data = adata[adata.obs[groupby] == cat, gene].raw.X
+                expressed_values = gene_data[gene_data > 0]
+                if expressed_values.size > 0.0:
+                    mean_values.append(expressed_values.mean())
+                else:
+                    mean_values.append(0)
+            mean_expression[cat] = mean_values
+    else:
+        mean_expression = pd.DataFrame(
+            {
+                cat: adata[adata.obs[groupby] == cat, var_names].X.mean(axis=0).A1
+                for cat in categories_order
+            },
+            index=var_names,
+        )
+
+    # --- 4) Create a melted DataFrame for plotting ---
+    data_for_plot = percentages.reset_index().melt(
+        id_vars="index", var_name="Category", value_name="Percentage"
+    )
+    data_for_plot["Mean Expression"] = mean_expression.reset_index().melt(
+        id_vars="index", var_name="Category", value_name="Expression"
+    )["Expression"]
+
+    # ----------------------------------------------------------------------------
+    #                     MAIN AXIS-SWITCHING CHANGES BELOW
+    # ----------------------------------------------------------------------------
+
+    # Genes (var_names) -> X-axis
+    # We'll assign each gene a numeric position (with no special spacing, but you can add your own logic if needed).
+    x_positions = np.arange(len(var_names))
+    counter=0
+    i_save=0
+    for i in range(1, len(x_positions)):
+        if (i-i_save) % padd_list_x[counter] == 0:
+            x_positions[i:] = x_positions[i:] + long_padding
+            print(i, counter, padd_list_x[counter])
+            counter +=1
+            i_save = i
+        else:
+            x_positions[i:] = x_positions[i:] + short_padding
+
+    gene_to_x = dict(zip(var_names, x_positions))
+    data_for_plot["x"] = data_for_plot["index"].map(gene_to_x)
+
+    # Categories -> Y-axis
+    # We'll apply the short/long padding logic here.
+    y_positions = np.arange(len(categories_order))
+    for i in range(1, len(y_positions)):
+        if i % x_padding_interval == 0:
+            y_positions[i:] = y_positions[i:] + long_padding
+        else:
+            y_positions[i:] = y_positions[i:] + short_padding
+
+    category_to_y = dict(zip(categories_order, y_positions))
+    data_for_plot["y"] = data_for_plot["Category"].map(category_to_y)
+
+    # ----------------------------------------------------------------------------
+    #                                 PLOTTING
+    # ----------------------------------------------------------------------------
+    plt.figure(figsize=figsize)
+    print(data_for_plot)
+    scatter_plot = sns.scatterplot(
+        data=data_for_plot,
+        x="x",
+        y="y",
+        size="Percentage",
+        sizes=(dot_min, dot_max),
+        hue="Mean Expression",
+        palette=cmap,
+        edgecolor="black",
+        linewidth=0.1,
+    )
+
+    # --- 5) Configure axis ticks & labels ---
+    # X-axis: Genes
+    scatter_plot.set_xticks(x_positions)
+    scatter_plot.set_xticklabels(var_names, rotation=90)
+    scatter_plot.set_xlabel("Genes")
+
+    # Y-axis: Category
+    scatter_plot.set_yticks(y_positions)
+    scatter_plot.set_yticklabels(categories_order)
+    scatter_plot.set_ylabel(groupby)
+    scatter_plot.invert_yaxis()
+
+    # --- 6) Adjust the dot size legend (percentage) ---
+    handles, labels = scatter_plot.get_legend_handles_labels()
+    # The size handles are usually the first few, but exact slicing can vary
+    # depending on Seaborn version. Adjust as necessary.
+    # Typically, size handles appear after all color handles. We look for "Percentage" or dot-min/dot-max in the labels.
+    # A simple approach is to find where "Mean Expression" label starts and slice up to that point.
+    try:
+        mean_expr_index = labels.index("Mean Expression")
+    except ValueError:
+        mean_expr_index = len(labels)  # fallback if not found
+    size_legend_handles = handles[:mean_expr_index]
+    size_legend_labels = labels[:mean_expr_index]
+
+    # Remove the default legend altogether
+    scatter_plot.legend_.remove()
+
+    # Re-add the legend for dot size
+    plt.legend(
+        handles=size_legend_handles,
+        labels=size_legend_labels,
+        title="Dot Size (%)",
+        bbox_to_anchor=(1.05, 1),
+        loc="upper left",
+        borderaxespad=0,
+    )
+
+    # --- 7) Add a colorbar for Mean Expression ---
+    # If you want dynamic vmin/vmax, compute them from data; here, we assume user-specified or a default range.
+    if vmin is None:
+        vmin = data_for_plot["Mean Expression"].min()
+    if vmax is None:
+        vmax = data_for_plot["Mean Expression"].max()
+
+    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+
+    cbar = plt.colorbar(
+        sm,
+        ax=scatter_plot,
+        orientation="horizontal",  # You can switch to 'vertical' if desired
+        pad=0.17,
+        aspect=50
+    )
+    cbar.set_label("Mean Expression")
+
+    plt.tight_layout()
+    # plt.show()
+    return data_for_plot
