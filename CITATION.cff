@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+title: "sc-multimodal-integration-benchmark"
+message: "If you use this software, please cite the paper and the exact software version used."
+type: software
+version: "v1.0.0"            
+date-released: "2025-10-29"
+authors:
+  - family-names: Acera-Mateos
+    given-names: Mario
+    orcid: "https://orcid.org/0000-0001-7032-2986"
+repository-code: "https://github.com/<org>/sc-multimodal-integration-benchmark"
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Acera-Mateos
+      given-names: Mario
+    - name: "et al."
+  title: "Systematic evaluation of single-cell multimodal data integration for comprehensive human reference atlas"
+  year: 2025
+  doi: "10.1101/2025.03.06.637075"
+  journal: "bioRxiv"
